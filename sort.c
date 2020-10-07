@@ -36,11 +36,6 @@
 #define LINE_MAX _POSIX_LINE_MAX
 #endif
 
-struct line {
-	FILE *file;
-	fpos_t pos;
-};
-
 static int sort_check(const char *input, char sep, const char *key, unsigned int flags)
 {
 	(void)sep;
@@ -75,19 +70,7 @@ static int sort_check(const char *input, char sep, const char *key, unsigned int
 	return 0;
 }
 
-static void sort_add_pos(struct line **lines, size_t *nlines, FILE *f)
-{
-	struct line *tmp = realloc(*lines, (*nlines + 1) * sizeof(**lines));
-	if (tmp == NULL) {
-		perror("sort");
-		exit(1);
-	}
-	*lines = tmp;
-	(*lines)[*nlines].file = f;
-	fgetpos(f, &((*lines)[*nlines].pos));
-}
-
-static int sort_read(const char *path, struct line **lines, size_t *nlines)
+static int sort_read(const char *path, char ***lines, size_t *nlines)
 {
 	FILE *f = stdin;
 	if (strcmp(path, "-")) {
@@ -100,31 +83,34 @@ static int sort_read(const char *path, struct line **lines, size_t *nlines)
 
 	char cur[LINE_MAX] = "";
 
-	sort_add_pos(lines, nlines, f);
 	while (fgets(cur, sizeof(cur), f) != NULL) {
+		char **tmp = realloc(*lines, sizeof(*lines) * (*nlines + 1));
+		if (tmp == NULL) {
+			abort();
+		}
+
+		*lines = tmp;
+		(*lines)[*nlines] = strdup(cur);
+		if ((*lines)[*nlines] == NULL) {
+			abort();
+		}
+
+		(*nlines)++;
 	}
 
-	/* ignore EOF position */
-	(*nlines)--;
+	if (f != stdin) {
+		fclose(f);
+	}
 
-	/* do *NOT* close f */
 	return 0;
 }
 
 static int sort_compar(const void *a, const void *b)
 {
-	const struct line *l1 = a;
-	const struct line *l2 = b;
-	char line1[LINE_MAX] = "";
-	char line2[LINE_MAX] = "";
+	const char *l1 = a;
+	const char *l2 = b;
 
-	fsetpos(l1->file, &l1->pos);
-	fgets(line1, sizeof(line1), l1->file);
-
-	fsetpos(l2->file, &l2->pos);
-	fgets(line2, sizeof(line2), l2->file);
-
-	return strcoll(line1, line2);
+	return strcoll(l1, l2);
 }
 
 static int sort_sort(char *files[], int nfiles, char sep, const char *key, unsigned int flags)
@@ -133,7 +119,7 @@ static int sort_sort(char *files[], int nfiles, char sep, const char *key, unsig
 	(void)key;
 	(void)flags;
 
-	struct line *lines = NULL;
+	char **lines = NULL;
 	size_t nlines = 0;
 
 	for (int i = 0; i < nfiles; i++) {
@@ -143,6 +129,10 @@ static int sort_sort(char *files[], int nfiles, char sep, const char *key, unsig
 	}
 
 	qsort(lines, nlines, sizeof(*lines), sort_compar);
+
+	for (size_t i = 0; i < nlines; i++) {
+		printf("%s", lines[i]);
+	}
 
 	return 0;
 }
@@ -198,6 +188,8 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
+
+	(void)output;
 
 	if (mode == CHECK) {
 		return sort_check(argv[optind], separator, key, flags);
